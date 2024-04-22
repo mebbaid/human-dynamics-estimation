@@ -31,6 +31,9 @@
 #include <numeric>
 #include <algorithm>
 
+// port to publish joint positions and velocities obtained from IK solution
+#include <yarp/os/BufferedPort.h>
+
 /*!
  * @brief analyze model and list of segments to create all possible segment pairs
  *
@@ -149,6 +152,9 @@ public:
     yarp::os::RpcServer rpcPort;
     bool applyRpcCommand();
 
+    // port to publish joint positions and velocities obtained from IK solution
+    yarp::os::BufferedPort<yarp::os::Bottle> iKSolutionPort;
+
     // Wearable variables
     WearableStorage wearableStorage;
 
@@ -187,7 +193,7 @@ public:
     std::unique_ptr<IKWorkerPool> ikPool;
     SolutionIK solution;
     InverseVelocityKinematicsSolverName inverseVelocityKinematicsSolver;
-    
+
 
     double posTargetWeight;
     double rotTargetWeight;
@@ -765,12 +771,12 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
             positionScaleFactor.setVal(0, positionScaleFactorGroup.find("x_scale_factor_all").asFloat64());
         else
             positionScaleFactor.setVal(0, positionScaleFactorValues->get(0).asFloat64());
-        
+
         if (yScaleFactorAllFlag)
             positionScaleFactor.setVal(1, positionScaleFactorGroup.find("y_scale_factor_all").asFloat64());
         else
             positionScaleFactor.setVal(1, positionScaleFactorValues->get(1).asFloat64());
-        
+
         if (zScaleFactorAllFlag)
             positionScaleFactor.setVal(2, positionScaleFactorGroup.find("z_scale_factor_all").asFloat64());
         else
@@ -800,9 +806,9 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
         pImpl->wearableTargets[targetName].get()->contactTreshold = contactTreshold;
         yInfo() << LogPrefix << "Adding contact treshold for " << targetName << "==>" << contactTreshold;
     }
-    
 
-    
+
+
 
     // ==========================================
     // PARSE THE DEPENDENDT CONFIGURATION OPTIONS
@@ -1025,7 +1031,7 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
         return false;
         }
     }
-    
+
     yInfo() << LogPrefix << "----------------------------------------" << modelLoader.isValid();
     yInfo() << LogPrefix << modelLoader.model().toString();
     yInfo() << LogPrefix << modelLoader.model().getNrOfLinks()
@@ -1076,7 +1082,7 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
     }
     else if(calibrationJointConfiguration.size() != nrOfDOFs)
     {
-        yError() << LogPrefix << "calibrationJointConfiguration param size (" << calibrationJointConfiguration.size() 
+        yError() << LogPrefix << "calibrationJointConfiguration param size (" << calibrationJointConfiguration.size()
                  << ") must match the number of DOFs of the model (" << nrOfDOFs <<"). ";
         return false;
     }
@@ -1366,11 +1372,19 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
     // Set rpc port reader
     pImpl->rpcPort.setReader(*pImpl->commandPro);
 
+    // open the iksolution port
+    if (!pImpl->iKSolutionPort.open("/ikSolution/jointNamesAndStates:o")) {
+        yError() << LogPrefix << "Unable to open ikSolution port";
+        return false;
+    }
+
     return true;
 }
 
 bool HumanStateProvider::close()
 {
+    // close the ik solution port
+    pImpl->iKSolutionPort.close();
     return true;
 }
 
@@ -1482,6 +1496,22 @@ void HumanStateProvider::run()
         }
     }
 
+    // Send the solution to the output port. Port should have all joint names, then all joint positions
+    // and then all joint velocities
+    yarp::os::Bottle& outputBottle = pImpl->iKSolutionPort.prepare();
+    outputBottle.clear();
+    for (unsigned i = 0; i < pImpl->solution.jointPositions.size(); ++i) {
+        outputBottle.addString(pImpl->humanModel.getJointName(i));
+    }
+    for (unsigned i = 0; i < pImpl->solution.jointPositions.size(); ++i) {
+        outputBottle.addFloat64(pImpl->solution.jointPositions[i]);
+    }
+    for (unsigned i = 0; i < pImpl->solution.jointVelocities.size(); ++i) {
+        outputBottle.addFloat64(pImpl->solution.jointVelocities[i]);
+    }
+
+    pImpl->iKSolutionPort.write();
+
     // compute the inverse kinematic errors (currently the result is unused, but it may be used for
     // evaluating the IK performance)
     // pImpl->computeLinksOrientationErrors(pImpl->linkTransformMatrices,
@@ -1578,7 +1608,7 @@ void HumanStateProvider::impl::computeSecondaryCalibrationRotationsForChain(cons
         iDynTree::Transform linkForCalibrationTransform = kinDynComputations->getWorldTransform(linkName);
         secondaryCalibrationWorld = refLinkForCalibrationTransform * linkForCalibrationTransform.inverse();
     }
-    
+
     for (auto wearableTargetEntry : wearableTargets)
     {
         hde::TargetName targetName = wearableTargetEntry.first;
@@ -1596,7 +1626,7 @@ void HumanStateProvider::impl::computeSecondaryCalibrationRotationsForChain(cons
             wearableTargetEntry.second->calibrationMeasurementToLink.setPosition( ((kinDynComputations->getWorldTransform(linkName).getPosition() - wearableTargetEntry.second->calibrationWorldToMeasurementWorld.getPosition()).changeCoordinateFrame(wearableTargetEntry.second->calibrationWorldToMeasurementWorld.getRotation().inverse()) - iDynTree::Position(wearableTargetEntry.second->position)).changeCoordinateFrame(wearableTargetEntry.second->rotation.inverse()) );
 
             wearableTargetEntry.second->calibrationWorldToMeasurementWorld = secondaryCalibrationWorld * wearableTargetEntry.second->calibrationWorldToMeasurementWorld;
-            
+
 
             yInfo() << LogPrefix << "Sensor to Link calibration rotation for " << targetName << " is set";
         }
@@ -1664,7 +1694,7 @@ bool HumanStateProvider::impl::applyRpcCommand()
         for (auto const& jointZeroIdx: jointZeroIndices) {
 
             jointPos.setVal(jointZeroIdx, jointCalibrationSolution.getVal(jointZeroIdx));
-            
+
         }
 
         kinDynComputations->setRobotState(iDynTree::Transform::Identity(), jointPos, baseVel, jointVel, worldGravity);
@@ -1719,7 +1749,7 @@ bool HumanStateProvider::impl::applyRpcCommand()
         std::string parentLinkName = wearableTargets[targetName].get()->modelLinkName;
 
         iDynTree::Rotation relativeRotationZero = kinDynComputations->getWorldTransform(parentLinkName).getRotation().inverse() * kinDynComputations->getWorldTransform(childLinkName).getRotation();
-    
+
         iDynTree::Rotation calibrationRotationMeasurementToLink = wearableTargets[childTargetName].get()->rotation * wearableTargets[childTargetName].get()->rotation * relativeRotationZero;
         wearableTargets[childTargetName].get()->calibrationMeasurementToLink.setRotation(calibrationRotationMeasurementToLink);
         yInfo() << LogPrefix << "secondary calibration for " << childTargetName << " is set";
@@ -2117,7 +2147,7 @@ bool HumanStateProvider::impl::initializeDynamicalInverseKinematicsSolver()
         yError() << LogPrefix << "Failed to set the dynamical inverse velocity kinematics targets";
         return false;
     }
-    
+
      if (!dynamicalInverseKinematics.setAllJointsVelocityLimit(dynamicalIKJointVelocityLimit)) {
         yError() << LogPrefix << "Failed to set all joints velocity limits";
         return false;
@@ -2263,7 +2293,7 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
         switch (targetType)
         {
         case hde::KinematicTargetType::pose: {
-            if (!dynamicalInverseKinematics.updateTargetPose(linkName, 
+            if (!dynamicalInverseKinematics.updateTargetPose(linkName,
                                                              wearableTargetEntry.second->getCalibratedPosition(),
                                                              wearableTargetEntry.second->getCalibratedRotation())) {
                 yError() << LogPrefix << "Failed to update pose target for " << targetName;
@@ -2271,7 +2301,7 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
                                                           }
             break; }
         case hde::KinematicTargetType::poseAndVelocity: {
-            if (!dynamicalInverseKinematics.updateTargetPoseAndVelocity(linkName, 
+            if (!dynamicalInverseKinematics.updateTargetPoseAndVelocity(linkName,
                                                                         wearableTargetEntry.second->getCalibratedPosition(),
                                                                         wearableTargetEntry.second->getCalibratedRotation(),
                                                                         wearableTargetEntry.second->getCalibratedLinearVelocity(),
@@ -2281,14 +2311,14 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
                                                                      }
             break; }
         case hde::KinematicTargetType::position: {
-            if (!dynamicalInverseKinematics.updateTargetPosition(linkName, 
+            if (!dynamicalInverseKinematics.updateTargetPosition(linkName,
                                                                  wearableTargetEntry.second->getCalibratedPosition())) {
                 yError() << LogPrefix << "Failed to update position target for " << targetName;
                 return false;
                                                               }
             break; }
         case hde::KinematicTargetType::positionAndVelocity: {
-            if (!dynamicalInverseKinematics.updateTargetPositionAndVelocity(linkName, 
+            if (!dynamicalInverseKinematics.updateTargetPositionAndVelocity(linkName,
                                                                             wearableTargetEntry.second->getCalibratedPosition(),
                                                                             wearableTargetEntry.second->getCalibratedLinearVelocity())) {
                 yError() << LogPrefix << "Failed to update position and velocity target for " << targetName;
@@ -2318,7 +2348,7 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
                                                                  }
             break; }
         case hde::KinematicTargetType::floorContact: {
-            if (!dynamicalInverseKinematics.updateTargetPositionAndVelocity(linkName, 
+            if (!dynamicalInverseKinematics.updateTargetPositionAndVelocity(linkName,
                                                                             wearableTargetEntry.second->getCalibratedPosition(),
                                                                             wearableTargetEntry.second->getCalibratedLinearVelocity())
                 || !dynamicalInverseKinematics.updatePositionTargetAxis(linkName, {wearableTargetEntry.second->contactActive, wearableTargetEntry.second->contactActive,  wearableTargetEntry.second->contactActive})) {
@@ -2336,7 +2366,7 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
 
     if (!dynamicalInverseKinematics.solve(dt))
         return false;
-    
+
     dynamicalInverseKinematics.getConfigurationSolution(baseTransformSolution, jointConfigurationSolution);
     dynamicalInverseKinematics.getVelocitySolution(baseVelocitySolution, jointVelocitiesSolution);
 
@@ -2474,7 +2504,7 @@ bool HumanStateProvider::impl::addDynamicalInverseKinematicsTargets()
         switch (targetType)
         {
         case hde::KinematicTargetType::pose: {
-            if (!dynamicalInverseKinematics.addPoseTarget(linkName, 
+            if (!dynamicalInverseKinematics.addPoseTarget(linkName,
                                                           wearableTargetEntry.second->position,
                                                           wearableTargetEntry.second->rotation,
                                                           {true, true, true},
@@ -2489,7 +2519,7 @@ bool HumanStateProvider::impl::addDynamicalInverseKinematicsTargets()
                 yInfo() << LogPrefix << "Pose Target " << targetName << " added for link " << linkName;
             break; }
         case hde::KinematicTargetType::poseAndVelocity: {
-            if (!dynamicalInverseKinematics.addPoseAndVelocityTarget(linkName, 
+            if (!dynamicalInverseKinematics.addPoseAndVelocityTarget(linkName,
                                                                      wearableTargetEntry.second->position,
                                                                      wearableTargetEntry.second->rotation,
                                                                      wearableTargetEntry.second->linearVelocity,
@@ -2508,7 +2538,7 @@ bool HumanStateProvider::impl::addDynamicalInverseKinematicsTargets()
                 yInfo() << LogPrefix << "Pose and Velocity Target " << targetName << " added for link " << linkName;
             break; }
         case hde::KinematicTargetType::position: {
-            if (!dynamicalInverseKinematics.addPositionTarget(linkName, 
+            if (!dynamicalInverseKinematics.addPositionTarget(linkName,
                                                               wearableTargetEntry.second->position,
                                                               {true, true, true},
                                                               dynamicalIKLinearCorrectionGain,
@@ -2519,7 +2549,7 @@ bool HumanStateProvider::impl::addDynamicalInverseKinematicsTargets()
                 yInfo() << LogPrefix << "Position Target " << targetName << " added for link " << linkName;
             break; }
         case hde::KinematicTargetType::positionAndVelocity: {
-            if (!dynamicalInverseKinematics.addPositionAndVelocityTarget(linkName, 
+            if (!dynamicalInverseKinematics.addPositionAndVelocityTarget(linkName,
                                                                          wearableTargetEntry.second->position,
                                                                          wearableTargetEntry.second->linearVelocity,
                                                                          {true, true, true},
@@ -2567,7 +2597,7 @@ bool HumanStateProvider::impl::addDynamicalInverseKinematicsTargets()
                 yInfo() << LogPrefix << "Gravity Target " << targetName << " added for link " << linkName;
             break; }
         case hde::KinematicTargetType::floorContact: {
-            if (!dynamicalInverseKinematics.addPositionAndVelocityTarget(linkName, 
+            if (!dynamicalInverseKinematics.addPositionAndVelocityTarget(linkName,
                                                                          wearableTargetEntry.second->position,
                                                                          wearableTargetEntry.second->linearVelocity,
                                                                          {true, true, true},
@@ -2678,7 +2708,7 @@ bool HumanStateProvider::impl::attach(yarp::dev::PolyDriver* poly)
 
         // Check if the wearable sensor exist and read the type
         auto sensor = iWear->getSensor(wearableName);
-        if (!sensor) 
+        if (!sensor)
         {
             yError() << "Failed to find sensor " << wearableName << " used in target " << targetName;
             return false;
