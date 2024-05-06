@@ -1503,10 +1503,10 @@ void HumanStateProvider::run()
     for (unsigned i = 0; i < pImpl->solution.jointPositions.size(); ++i) {
         outputBottle.addString(pImpl->humanModel.getJointName(i));
     }
-    for (unsigned i = 0; i < pImpl->solution.jointPositions.size(); ++i) {
+    for (unsigned i = 18; i < pImpl->solution.jointPositions.size(); ++i) {
         outputBottle.addFloat64(pImpl->solution.jointPositions[i]);
     }
-    for (unsigned i = 0; i < pImpl->solution.jointVelocities.size(); ++i) {
+    for (unsigned i = 18; i < pImpl->solution.jointVelocities.size(); ++i) {
         outputBottle.addFloat64(pImpl->solution.jointVelocities[i]);
     }
 
