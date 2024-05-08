@@ -1500,13 +1500,13 @@ void HumanStateProvider::run()
     // and then all joint velocities
     yarp::os::Bottle& outputBottle = pImpl->iKSolutionPort.prepare();
     outputBottle.clear();
-    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfDOFs(); ++i) {
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
         outputBottle.addString(pImpl->humanModel.getJointName(i));
     }
-    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfDOFs(); ++i) {
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
         outputBottle.addFloat64(pImpl->solution.jointPositions[i]);
     }
-    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfDOFs(); ++i) {
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
         outputBottle.addFloat64(pImpl->solution.jointVelocities[i]);
     }
 
