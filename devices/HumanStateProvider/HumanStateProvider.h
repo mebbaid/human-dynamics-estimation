@@ -10,6 +10,10 @@
 #include <yarp/dev/IMultipleWrapper.h>
 #include <yarp/os/PeriodicThread.h>
 
+#include <BipedalLocomotion/YarpUtilities/VectorsCollectionServer.h>
+#include <BipedalLocomotion/ParametersHandler/IParametersHandler.h>
+#include <BipedalLocomotion/ParametersHandler/YarpImplementation.h>
+
 #include <memory>
 
 namespace hde {
@@ -28,6 +32,8 @@ class hde::devices::HumanStateProvider final
 private:
     class impl;
     std::unique_ptr<impl> pImpl;
+
+    BipedalLocomotion::YarpUtilities::VectorsCollectionServer m_vectorsCollectionServer;
 
 public:
     HumanStateProvider();

@@ -138,6 +138,7 @@ public:
     wearable::IWear* iWear = nullptr;
 
     bool allowIKFailures;
+    bool logData;
 
     double period;
     mutable std::mutex mutex;
@@ -443,6 +444,35 @@ bool HumanStateProvider::open(yarp::os::Searchable& config)
 
     if (!(config.check("period") && config.find("period").isFloat64())) {
         yInfo() << LogPrefix << "Using default period:" << DefaultPeriod << "s";
+    }
+
+    if (!(config.check("logData") && config.find("logData").isBool())) {
+        yInfo() << LogPrefix << "logData option not found or not valid, defaulting to false";
+        pImpl->logData = false;
+    }
+
+    pImpl->logData = config.find("logData").asBool();
+
+    if (pImpl->logData) {
+        std::string logPort;
+        if (config.check("loggerPortPrefix") && config.find("loggerPortPrefix").isString()) {
+            logPort = "/" + config.find("loggerPortPrefix").asString();
+        }
+        else {
+            logPort = "/humanStateProvider/log";
+        }
+
+        auto loggerOption = std::make_shared<BipedalLocomotion::ParametersHandler::YarpImplementation>();
+        loggerOption->setParameter("remote", logPort);
+
+        if (!m_vectorsCollectionServer.initialize(loggerOption))
+        {
+            yError() << LogPrefix << "Failed to initialize the logger";
+            return false;
+        }
+
+        m_vectorsCollectionServer.populateMetadata("joints_state::positions::ik", pImpl->jointList);
+        m_vectorsCollectionServer.finalizeMetadata();
     }
 
     if (!(config.check("urdf") && config.find("urdf").isString())) {
@@ -1520,6 +1550,31 @@ void HumanStateProvider::run()
         }
     }
 
+    // Send the solution to the output port. Port should have all joint names, then all joint positions
+    // and then all joint velocities
+    yarp::os::Bottle& outputBottle = pImpl->iKSolutionPort.prepare();
+    outputBottle.clear();
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
+        outputBottle.addString(pImpl->humanModel.getJointName(i));
+    }
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
+        outputBottle.addFloat64(pImpl->solution.jointPositions[i]);
+    }
+    for (unsigned i = 0 ; i < pImpl->humanModel.getNrOfJoints(); ++i) {
+        outputBottle.addFloat64(pImpl->solution.jointVelocities[i]);
+    }
+
+    pImpl->iKSolutionPort.write();
+
+    if (pImpl->logData) {
+        m_vectorsCollectionServer.prepareData();
+        m_vectorsCollectionServer.clearData();
+
+        m_vectorsCollectionServer.populateData("jointPositions", pImpl->solution.jointPositions);
+        m_vectorsCollectionServer.populateData("jointVelocities", pImpl->solution.jointVelocities);
+        m_vectorsCollectionServer.sendData();
+    }
+
     // compute the inverse kinematic errors (currently the result is unused, but it may be used for
     // evaluating the IK performance)
     // pImpl->computeLinksOrientationErrors(pImpl->linkTransformMatrices,
@@ -2475,7 +2530,7 @@ bool HumanStateProvider::impl::solveDynamicalInverseKinematics()
         {
             return false;
         }
-        else 
+        else
         {
             resetIntegrator = false;
         }

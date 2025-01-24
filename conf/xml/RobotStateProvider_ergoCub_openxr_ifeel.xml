@@ -37,6 +37,8 @@
 
     <device type="human_state_provider" name="RobotStateProvider">
         <param name="period">0.01</param>
+        <param name="logData">false</param>
+        <param name="loggerPortPrefix">logger</param>
         <param name="urdf">model.urdf</param>
         <param name="floatingBaseFrame">root_link</param>
         <!-- ikSolver options: pairwised, global, dynamical -->

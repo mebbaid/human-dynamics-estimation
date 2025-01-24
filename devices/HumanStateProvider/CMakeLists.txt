@@ -3,6 +3,7 @@
 
 find_package(iDynTree REQUIRED)
 find_package(OsqpEigen 0.4.0 REQUIRED)
+find_package(BipedalLocomotionFramework 0.17.0 REQUIRED)
 
 
 yarp_prepare_plugin(human_state_provider
@@ -20,7 +21,8 @@ yarp_add_plugin(HumanStateProvider
 
 target_include_directories(HumanStateProvider PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    SYSTEM PRIVATE ${EIGEN3_INCLUDE_DIR})
+    SYSTEM PRIVATE ${EIGEN3_INCLUDE_DIR}
+    )
 
 target_link_libraries(HumanStateProvider PUBLIC
     YARP::YARP_OS
@@ -35,6 +37,8 @@ target_link_libraries(HumanStateProvider PUBLIC
     IWearableTargets
     HumanDynamicsEstimation::utils
     HumanDynamicsEstimation::algorithms
+    BipedalLocomotion::VectorsCollection
+    BipedalLocomotion::ParametersHandlerYarpImplementation
     )
 
 if(MSVC)
